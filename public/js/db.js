@@ -195,12 +195,8 @@ class ShaktDB {
       if (item && item.value !== undefined && item.value !== null && item.value !== '') {
         return item.value;
       }
-      if (key === 'apiKey') {
-        return 'sk-6f27afebc1ad2590-cde680-9b91e328';
-      }
       return defaultValue;
     } catch {
-      if (key === 'apiKey') return 'sk-6f27afebc1ad2590-cde680-9b91e328';
       return defaultValue;
     }
   }
