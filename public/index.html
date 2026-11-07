@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <meta name="description" content="Shakt - Transform your handwritten PDF notes into searchable text with perfect diagram preservation. AI-powered study companion with doubt solving and direct edit mode.">
+  <title>Shakt | AI-Powered PDF Note Digitizer & Study Companion</title>
+
+  <!-- PWA & Android Meta Tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1A1F28">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+
+  <!-- KaTeX for Physics, Chemistry, Maths & Greek Equations -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <script src="/vendor/katex/katex.min.js"></script>
+  <script src="/vendor/katex/auto-render.min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/css/styles.css">
+
+  <!-- PDF.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar" role="banner">
+    <div class="nav-brand">
+      <img src="/icons/icon-192.svg" alt="Shakt Logo" class="brand-icon" />
+      <span class="brand-name" aria-label="Shakt">Shakt</span>
+      <span class="brand-badge">v1.2</span>
+    </div>
+
+    <div class="nav-center">
+      <label for="pdf-select-dropdown" class="sr-only">Select PDF Document</label>
+      <select id="pdf-select-dropdown" class="pdf-select-dropdown" aria-label="Select or switch notes PDF">
+        <option value="">-- Switch Note PDF --</option>
+      </select>
+    </div>
+
+    <!-- View Mode Switcher: PDF / Split / Transformed Notes -->
+    <div class="view-mode-selector" role="group" aria-label="Workspace View Mode">
+      <button class="view-mode-btn" id="btn-view-pdf" title="Original PDF View">
+        <span class="icon">📄</span> PDF
+      </button>
+      <button class="view-mode-btn" id="btn-view-split" title="Split View (Original PDF + Transformed Notes)">
+        <span class="icon">📖</span> Split
+      </button>
+      <button class="view-mode-btn active" id="btn-view-notes" title="Transformed Notes View (Focused Study)">
+        <span class="icon">✍️</span> Notes
+      </button>
+    </div>
+
+    <nav class="nav-actions" aria-label="Main actions">
+      <div id="token-usage-badge" class="token-usage-badge" role="status" aria-live="polite" title="Live session tokens & prompt cache savings">
+        ⚡ 0 tokens
+      </div>
+      <input type="file" id="pdf-file-input" accept="application/pdf" style="display: none;" aria-label="Upload PDF file" />
+      <button class="shakt-btn primary btn-sm" id="btn-upload-pdf" aria-label="Open or Upload PDF Notes">
+        <span class="icon" aria-hidden="true">📁</span> Open PDF
+      </button>
+      <button class="shakt-btn secondary btn-sm" id="btn-load-sample" aria-label="Load sample note with English, Hinglish, and Hindi text">
+        <span aria-hidden="true">🌟</span> Sample
+      </button>
+      <button class="shakt-btn primary-glow btn-sm" id="btn-toggle-ai-sidebar" aria-label="Expand or collapse AI Doubt Copilot Sidebar" title="Toggle AI Copilot (Ctrl+K)">
+        <span class="icon" aria-hidden="true">🤖</span> <span class="ai-btn-label">AI Copilot</span>
+      </button>
+      <button class="shakt-btn ghost" id="btn-theme-toggle" aria-label="Toggle between dark and light mode">
+        <span aria-hidden="true">☀️</span>
+      </button>
+      <button class="shakt-btn ghost" id="btn-settings" aria-label="Open settings and configure API key">
+        <span aria-hidden="true">⚙️</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- Resume Reading Banner (Next-Day Persistence) -->
+  <aside id="resume-reading-banner" class="resume-reading-banner" role="alert" aria-live="polite" style="display: none;">
+    <div>
+      <span aria-hidden="true">📖 </span>
+      <strong id="resume-banner-text">Resumed from Page 1</strong>
+    </div>
+    <button id="btn-dismiss-resume" class="btn-dismiss" aria-label="Dismiss resume notification">✕</button>
+  </aside>
+
+  <!-- Main Multi-View Workspace -->
+  <main class="app-container view-notes" id="app-container" role="main">
+
+    <!-- Left Pane: PDF Viewer -->
+    <section class="pane pane-pdf" id="pane-pdf" aria-label="PDF Viewer">
+      <header class="pane-header">
+        <h2 class="pane-title">
+          <span class="icon" aria-hidden="true">📄</span> Original Note PDF
+        </h2>
+        <div class="pane-controls">
+          <button class="shakt-btn primary btn-sm" id="btn-convert-page" title="Convert this page into structured notes, KaTeX formulas, and diagrams">
+            <span aria-hidden="true">⚡</span> Convert Page
+          </button>
+          <button class="shakt-btn secondary btn-sm" id="btn-batch-convert-pdf" title="Convert entire PDF or page range">
+            <span aria-hidden="true">⚡</span> Convert Whole PDF
+          </button>
+        </div>
+      </header>
+
+      <!-- PDF Canvas Viewport -->
+      <div class="pdf-scroll-container" id="pdf-scroll-container" role="region" aria-label="PDF page display">
+        <div id="pdf-canvas-container"></div>
+      </div>
+
+      <!-- PDF Page Navigation Bar -->
+      <nav class="pdf-toolbar" aria-label="PDF page navigation">
+        <button class="shakt-btn secondary btn-sm" id="btn-prev-page" aria-label="Go to previous page">
+          <span aria-hidden="true">◀</span> Prev
+        </button>
+        <span id="page-indicator" role="status" aria-live="polite">Page 1 of 1</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="jump-page-input" style="font-size: 0.9rem; color: var(--text-muted);">Jump to:</label>
+          <input type="number" id="jump-page-input" class="jump-page-input" min="1" value="1" aria-label="Jump to page number" />
+        </div>
+        <button class="shakt-btn secondary btn-sm" id="btn-next-page" aria-label="Go to next page">
+          Next <span aria-hidden="true">▶</span>
+        </button>
+      </nav>
+    </section>
+
+    <!-- Center Pane: Transformed Notes & Rich Editor (Primary Focus) -->
+    <section class="pane pane-notes" id="pane-notes" aria-label="Notes Editor">
+      <header class="pane-header notes-pane-header">
+        <div class="notes-header-left">
+          <h2 class="pane-title">
+            <span class="icon" aria-hidden="true">✍️</span> Transformed Notes
+          </h2>
+          <span id="doc-page-badge" class="badge-subtle">Page 1</span>
+        </div>
+
+        <div class="notes-header-center">
+          <!-- Read Mode vs Edit Mode Toggle -->
+          <div class="mode-toggle-group" role="group" aria-label="Document Mode">
+            <button class="mode-btn active" id="btn-mode-read" title="Clean, distraction-free study mode with KaTeX math & zoomable diagrams">
+              <span class="icon">📖</span> Read Mode
+            </button>
+            <button class="mode-btn" id="btn-mode-edit" title="Edit text, add formulas, insert outer diagrams, and adjust space sliders">
+              <span class="icon">✏️</span> Edit Mode
+            </button>
+          </div>
+        </div>
+
+        <div class="notes-header-right">
+          <!-- Quick actions -->
+          <button class="shakt-btn ghost btn-sm" id="btn-undo" title="Undo (Ctrl+Z)" disabled>
+            <span aria-hidden="true">↩️</span>
+          </button>
+          <button class="shakt-btn ghost btn-sm" id="btn-redo" title="Redo (Ctrl+Y)" disabled>
+            <span aria-hidden="true">↪️</span>
+          </button>
+          <button class="shakt-btn ghost btn-sm" id="btn-search-notes" title="Search notes (Ctrl+F)">
+            <span aria-hidden="true">🔍</span>
+          </button>
+          <button class="shakt-btn ghost btn-sm" id="btn-export-notes" title="Export notes as Markdown, PDF, HTML">
+            <span aria-hidden="true">📤</span>
+          </button>
+          <button class="shakt-btn primary btn-sm" id="btn-convert-page-top" title="Convert this page with AI">
+            <span aria-hidden="true">⚡</span> Convert Page
+          </button>
+        </div>
+      </header>
+
+      <!-- Edit Mode Action Bar (Visible only when Edit Mode is active) -->
+      <div id="edit-mode-action-bar" class="edit-mode-action-bar" style="display: none;">
+        <span class="edit-bar-label">✏️ Edit Mode Active &mdash; AI has auto-permission to edit:</span>
+        <div class="edit-bar-buttons">
+          <button class="shakt-btn secondary btn-xs" id="btn-add-text-block">
+            <span class="icon">+</span> Text Note
+          </button>
+          <button class="shakt-btn secondary btn-xs" id="btn-add-formula-block">
+            <span class="icon">∑</span> Formula (LaTeX / Greek)
+          </button>
+          <button class="shakt-btn secondary btn-xs" id="btn-upload-outer-diagram">
+            <span class="icon">🖼️</span> Outer Diagram
+          </button>
+          <button class="shakt-btn secondary btn-xs" id="btn-add-realisation-block">
+            <span class="icon">💡</span> Realisation
+          </button>
+        </div>
+        <input type="file" id="outer-diagram-file-input" accept="image/*" style="display: none;" />
+      </div>
+
+      <!-- Notes Document Scroll Area -->
+      <div class="note-editor-wrapper">
+        <div class="doc-meta-header">
+          <h2 id="current-doc-title" class="current-doc-title">No Note Loaded</h2>
+          <div class="page-indicator-badge">Auto-saves locally &bull; KaTeX STEM Rendering &bull; Dynamic Space Reflow</div>
+        </div>
+
+        <div id="note-editor-container" class="note-editor-container"></div>
+      </div>
+    </section>
+
+    <!-- Right Pane: Expandable / Collapsible AI Doubt Copilot Sidebar -->
+    <aside class="pane pane-doubts" id="pane-doubts" aria-label="AI Doubt Copilot Sidebar">
+      <div class="pane-header ai-sidebar-header">
+        <div class="pane-title">
+          <span>🤖</span> AI Copilot
+          <span class="badge-ai-perm" title="AI is authorized to directly insert and update note blocks when instructed">⚡ Auto-Edit</span>
+        </div>
+        <div class="pane-controls">
+          <button class="btn-dismiss" id="btn-close-ai-sidebar" title="Collapse AI Sidebar (Ctrl+K)" aria-label="Collapse AI Sidebar">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Active Diagram Context Banner (Shown when user asks about a diagram) -->
+      <div id="doubt-diagram-context-banner" class="doubt-diagram-context-banner" style="display: none;">
+        <span class="banner-text">Context: Diagram</span>
+        <button id="btn-clear-diagram-context" class="btn-dismiss" style="font-size: 0.8rem;">✕</button>
+      </div>
+
+      <!-- AI Edit Action Notification Banner -->
+      <div id="ai-edit-notification-banner" class="ai-edit-notification-banner" style="display: none;">
+        <span class="notif-text">⚡ AI updated document</span>
+        <button id="btn-undo-ai-action" class="btn-undo-ai" title="Undo this AI edit">Undo</button>
+      </div>
+
+      <!-- Messages Stream -->
+      <div class="doubt-messages-container" id="doubt-messages"></div>
+
+      <!-- Message Input Bar -->
+      <div class="doubt-input-bar">
+        <input
+          type="text"
+          id="doubt-input"
+          class="doubt-input"
+          placeholder="Ask a doubt or tell AI to edit notes ('Add summary', 'Insert formula', etc.)..."
+          autocomplete="off"
+        />
+        <button id="btn-send-doubt" class="doubt-send-btn" title="Send doubt or command">
+          ➤
+        </button>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Mobile Navigation Bar for Android Touch Devices -->
+  <nav class="mobile-nav-bar">
+    <button class="mobile-nav-btn" data-tab="pdf">
+      <span class="mobile-nav-icon">📄</span>
+      <span>PDF View</span>
+    </button>
+    <button class="mobile-nav-btn active" data-tab="notes">
+      <span class="mobile-nav-icon">✍️</span>
+      <span>Notes</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="doubts">
+      <span class="mobile-nav-icon">🤖</span>
+      <span>AI Copilot</span>
+    </button>
+  </nav>
+
+  <!-- Diagram Lightbox Modal for Zooming -->
+  <div id="diagram-lightbox-modal" class="shakt-modal-overlay" style="display: none;">
+    <div class="lightbox-card">
+      <div class="lightbox-header">
+        <h4 id="lightbox-title">Diagram Zoom View</h4>
+        <button id="btn-close-lightbox" class="btn-dismiss">✕</button>
+      </div>
+      <div class="lightbox-body">
+        <img id="lightbox-img" src="" alt="Diagram Zoom" />
+      </div>
+      <div class="lightbox-caption" id="lightbox-caption"></div>
+    </div>
+  </div>
+
+  <!-- Settings & API Key Modal -->
+  <div id="settings-modal" class="shakt-modal-overlay" style="display: none;">
+    <div class="shakt-modal-card">
+      <div class="modal-header">
+        <h3>⚙️ Shakt Settings</h3>
+        <button id="btn-close-settings" class="btn-dismiss">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="input-api-key">Anthropic API Key</label>
+        <input
+          type="password"
+          id="input-api-key"
+          class="form-input"
+          placeholder="sk-ant-api03-... or env token"
+        />
+        <div class="form-help">
+          Stored securely in your local browser IndexedDB or automatically loaded from environment.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="select-model">AI Model</label>
+        <select id="select-model" class="form-select">
+          <option value="omni-route" selected>omni-route (Auto-Routed Multi-Model)</option>
+          <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+          <option value="claude-3-7-sonnet-20250219">Claude 3.7 Sonnet</option>
+          <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+        </select>
+      </div>
+
+      <div class="form-group form-check-group">
+        <label class="form-checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <input type="checkbox" id="toggle-economy-mode" style="width: 18px; height: 18px; accent-color: var(--accent-primary);" />
+          <span style="font-size: 0.88rem; color: var(--text-main);"><strong>⚡ Token Economy Mode</strong></span>
+        </label>
+        <div class="form-help">
+          Optimizes prompt caching and context window to minimize token costs.
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="shakt-btn primary" id="btn-save-settings">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Conversion Processing Modal -->
+  <div id="conversion-modal" class="shakt-modal-overlay" style="display: none;">
+    <div class="shakt-modal-card" style="max-width: 420px;">
+      <div class="conversion-loader">
+        <div class="pulse-spinner"></div>
+        <h3 style="font-family: var(--font-heading); margin-bottom: 8px;">Digitizing Notes & Diagrams</h3>
+        <p id="conversion-status" style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5;">
+          Reading page with AI...
+        </p>
+        <div class="conversion-progress-bar" style="margin-top: 14px; width: 100%; height: 6px; background: var(--border-subtle); border-radius: 3px; overflow: hidden;">
+          <div id="conversion-progress-fill" style="width: 30%; height: 100%; background: linear-gradient(90deg, #4F7EFF, #7C5CFF); transition: width 0.3s ease;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Application Logic Scripts -->
+  <script src="/js/db.js"></script>
+  <script src="/js/sample-data.js"></script>
+  <script src="/js/pdf-viewer.js"></script>
+  <script src="/js/ai-converter.js"></script>
+  <script src="/js/note-editor.js"></script>
+  <script src="/js/ai-doubt.js"></script>
+  <script src="/js/search-notes.js"></script>
+  <script src="/js/export-notes.js"></script>
+  <script src="/js/undo-redo.js"></script>
+  <script src="/js/batch-converter.js"></script>
+  <script src="/js/app.js"></script>
+
+</body>
+</html>

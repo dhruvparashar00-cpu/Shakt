@@ -1,0 +1,24 @@
+{
+  "name": "shakt",
+  "version": "1.0.0",
+  "description": "Shakt - AI-Powered Note-Taking & PDF Study Companion for Linux and Android",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "notes",
+    "pdf",
+    "ocr",
+    "ai",
+    "claude",
+    "hinglish",
+    "hindi",
+    "study",
+    "android",
+    "linux"
+  ],
+  "author": "Shakt Team",
+  "license": "MIT"
+}

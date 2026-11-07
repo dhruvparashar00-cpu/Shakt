@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Python cache & virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+myenv/
+.venv/
+
+# Editor & IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code local data
+.claude/settings.local.json
+.claude/backups/
+
+# OS generated files
+.DS_Store
+Thumbs.db
