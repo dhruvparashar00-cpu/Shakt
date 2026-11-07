@@ -175,7 +175,8 @@ class ShaktExportNotes {
   }
 
   async getAllPagesWithNotes(pdfId) {
-    const db = await window.shaktDB.db;
+    await window.shaktDB.ready;
+    const db = window.shaktDB.db;
     const tx = db.transaction(['pageNotes'], 'readonly');
     const store = tx.objectStore('pageNotes');
     const allNotes = await store.getAll();

@@ -1,7 +1,20 @@
 {
-    "permissions": {
-      "bash": {
-        "allowed": true
-      }
-    }
+  "theme": "dark",
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "NotebookEdit(*)",
+      "Agent(*)",
+      "Skill(*)",
+      "Workflow(*)",
+      "ToolSearch(*)",
+      "ReportFindings(*)"
+    ],
+    "deny": []
   }
+}

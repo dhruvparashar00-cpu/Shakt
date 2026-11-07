@@ -1308,6 +1308,44 @@ body {
   justify-content: center;
 }
 
+/* Shortcuts Modal Grid */
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+
+.shortcut-row kbd {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--accent-primary);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-main);
+  font-size: 0.85rem;
+  font-weight: 700;
+  min-width: 64px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.shortcut-row span {
+  font-size: 0.9rem;
+  color: var(--text-main);
+  font-weight: 500;
+}
+
 /* Accessibility Improvements */
 .sr-only {
   position: absolute;
@@ -1720,6 +1758,23 @@ body {
 
 .history-btn:active:not(:disabled) {
   transform: scale(0.95);
+}
+
+/* Data Management Actions in Settings Modal */
+.data-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-clear-all-data {
+  color: #FF4757 !important;
+  border-color: #FF4757 !important;
+}
+
+.btn-clear-all-data:hover {
+  background: #FF4757 !important;
+  color: #FFFFFF !important;
 }
 
 /* Mobile Responsiveness for Android (Phones & Tablets) */

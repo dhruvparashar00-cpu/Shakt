@@ -69,6 +69,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const elResumeBannerText = document.getElementById('resume-banner-text');
   const elBtnDismissResume = document.getElementById('btn-dismiss-resume');
 
+  // Data management elements
+  const elBtnExportData = document.getElementById('btn-export-all-data');
+  const elBtnImportData = document.getElementById('btn-import-all-data');
+  const elImportDataFile = document.getElementById('import-data-file');
+  const elBtnClearData = document.getElementById('btn-clear-all-data');
+
+  // Keyboard shortcuts help
+  const elBtnHelp = document.getElementById('btn-help');
+  const elShortcutsModal = document.getElementById('shortcuts-modal');
+  const elCloseShortcuts = document.getElementById('btn-close-shortcuts');
+
   const elBtnUndo = document.getElementById('btn-undo');
   const elBtnRedo = document.getElementById('btn-redo');
   const elBtnSearch = document.getElementById('btn-search-notes');
@@ -529,6 +540,74 @@ document.addEventListener('DOMContentLoaded', async () => {
   elBtnConvert.addEventListener('click', handleConvertCurrentPage);
   if (elBtnConvertTop) elBtnConvertTop.addEventListener('click', handleConvertCurrentPage);
 
+  // --- CONVERT SELECTED AREA (Region-based OCR) ---
+  const elBtnConvertSelection = document.getElementById('btn-convert-selection');
+  let selectedRegion = null;
+
+  // Listen for area selection from PDF viewer
+  window.addEventListener('shakt:area-selected', (e) => {
+    selectedRegion = e.detail;
+    showToast('🎯 Area selected. Click "Convert Selection" to digitize just this region.', 'info');
+  });
+
+  elBtnConvertSelection.addEventListener('click', async () => {
+    if (!currentPdf) {
+      showToast('Please open or upload a PDF first.', 'error');
+      return;
+    }
+
+    const imageBase64 = pdfViewer.getPageImageBase64(0.92);
+    if (!imageBase64) {
+      showToast('Please wait for the PDF page to render first.', 'error');
+      return;
+    }
+
+    if (!selectedRegion) {
+      showToast('Please select an area on the PDF first (click and drag on the page).', 'info');
+      return;
+    }
+
+    elConversionModal.style.display = 'flex';
+    elConversionStatus.textContent = '1/2: Cropping selected region from page...';
+    if (elConversionProgressFill) elConversionProgressFill.style.width = '40%';
+
+    try {
+      setTimeout(() => {
+        elConversionStatus.textContent = '2/2: Digitizing selected region with AI...';
+        if (elConversionProgressFill) elConversionProgressFill.style.width = '80%';
+      }, 800);
+
+      // Crop the selected region from the rendered canvas
+      const croppedImageUrl = pdfViewer.cropRegion(selectedRegion);
+      if (!croppedImageUrl) {
+        throw new Error('Failed to crop selected region');
+      }
+
+      const result = await aiConverter.convertPage(croppedImageUrl, pdfViewer, pdfViewer.currentPageNum);
+
+      // Save to IndexedDB
+      await window.shaktDB.savePageNote(currentPdf.id, pdfViewer.currentPageNum, result.blocks);
+
+      // Load into note editor
+      noteEditor.loadBlocks(result.blocks, currentPdf.id, pdfViewer.currentPageNum);
+      historyManager.pushState(result.blocks, 'convert-selection');
+      updateUndoRedoButtons();
+
+      selectedRegion = null;
+
+      setTimeout(() => {
+        elConversionModal.style.display = 'none';
+        showToast('⚡ Selected region digitized successfully!');
+        setViewMode('notes');
+      }, 600);
+
+    } catch (err) {
+      console.error('Region conversion error:', err);
+      elConversionModal.style.display = 'none';
+      showToast('Region conversion failed: ' + (err.message || 'Unknown error'), 'error');
+    }
+  });
+
   // --- CONVERT WHOLE PDF (All Pages Batch) ---
   if (elBtnBatchConvertPdf) {
     elBtnBatchConvertPdf.addEventListener('click', async () => {
@@ -605,6 +684,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // --- Toast Event Listener (for batch-converter & export modules) ---
+  window.addEventListener('shakt:toast', (e) => {
+    const detail = e.detail || {};
+    showToast(detail.message || 'Action completed', detail.type || 'info');
+  });
+
   // --- Token Badge ---
   let totalSessionTokens = 0;
   let totalCachedTokens = 0;
@@ -645,6 +730,195 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     elSettingsModal.style.display = 'none';
     showToast('Settings saved successfully!');
+  });
+
+  // --- Data Management: Export All Data (Backup) ---
+  elBtnExportData.addEventListener('click', async () => {
+    try {
+      const pdfs = await window.shaktDB.getAllPdfs();
+      const settings = await window.shaktDB.getSetting('apiKey') || null;
+      const model = await window.shaktDB.getSetting('model') || 'omni-route';
+      const theme = await window.shaktDB.getSetting('theme', 'dark');
+      const activePdfId = await window.shaktDB.getSetting('activePdfId', null);
+
+      // Collect all page notes
+      await window.shaktDB.ready;
+      const shaktDb = window.shaktDB.db;
+      const allPageNotes = [];
+      for (const pdf of pdfs) {
+        const tx = shaktDb.transaction(['pages'], 'readonly');
+        const store = tx.objectStore('pages');
+        const allPages = await new Promise((resolve, reject) => {
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(tx.error);
+        });
+        const pdfPages = allPages.filter(p => p.pdfId === pdf.id);
+        allPageNotes.push(...pdfPages);
+      }
+
+      // Collect doubts
+      const allDoubts = [];
+      const tx2 = shaktDb.transaction(['doubts'], 'readonly');
+      const store2 = tx2.objectStore('doubts');
+      const allDoubtsRaw = await new Promise((resolve, reject) => {
+        const req = store2.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(tx2.error);
+      });
+      allDoubts.push(...allDoubtsRaw);
+
+      const backup = {
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        app: 'Shakt',
+        data: {
+          pdfs: pdfs.map(p => ({ id: p.id, name: p.name, size: p.size, totalPages: p.totalPages, lastOpenedPage: p.lastOpenedPage, lastOpenedAt: p.lastOpenedAt })),
+          pageNotes: allPageNotes,
+          doubts: allDoubts,
+          settings: { apiKey: settings, model, theme, activePdfId }
+        }
+      };
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `shakt-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      elSettingsModal.style.display = 'none';
+      showToast('✓ Backup downloaded successfully!', 'success');
+    } catch (err) {
+      console.error('Backup export failed:', err);
+      showToast('Backup failed: ' + err.message, 'error');
+    }
+  });
+
+  // --- Data Management: Import All Data (Restore) ---
+  elBtnImportData.addEventListener('click', () => {
+    elImportDataFile.click();
+  });
+
+  elImportDataFile.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const confirmed = confirm('This will overwrite all local notes and settings. Continue?');
+    if (!confirmed) {
+      elImportDataFile.value = '';
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+
+      if (!backup || !backup.data) {
+        throw new Error('Invalid backup file format');
+      }
+
+      const { pdfs, pageNotes, doubts, settings } = backup.data;
+
+      // Clear existing stores
+      await window.shaktDB._tx('pdfs', 'readwrite', (store) => {
+        store.clear();
+      });
+      await window.shaktDB._tx('pages', 'readwrite', (store) => {
+        store.clear();
+      });
+      await window.shaktDB._tx('doubts', 'readwrite', (store) => {
+        store.clear();
+      });
+
+      // Restore PDFs (without blobs - user must re-upload PDFs, but notes are preserved)
+      for (const pdf of pdfs || []) {
+        await window.shaktDB.savePdf({
+          id: pdf.id,
+          name: pdf.name,
+          size: pdf.size,
+          blob: null,
+          totalPages: pdf.totalPages,
+          lastOpenedPage: pdf.lastOpenedPage,
+          lastOpenedAt: pdf.lastOpenedAt || Date.now()
+        });
+      }
+
+      // Restore page notes
+      for (const note of pageNotes || []) {
+        await window.shaktDB._tx('pages', 'readwrite', (store) => {
+          store.put(note);
+        });
+      }
+
+      // Restore doubts
+      for (const doubt of doubts || []) {
+        await window.shaktDB._tx('doubts', 'readwrite', (store) => {
+          store.put(doubt);
+        });
+      }
+
+      // Restore settings
+      if (settings) {
+        if (settings.apiKey) await window.shaktDB.setSetting('apiKey', settings.apiKey);
+        if (settings.model) await window.shaktDB.setSetting('model', settings.model);
+        if (settings.theme) await window.shaktDB.setSetting('theme', settings.theme);
+        if (settings.activePdfId) await window.shaktDB.setSetting('activePdfId', settings.activePdfId);
+      }
+
+      elImportDataFile.value = '';
+      elSettingsModal.style.display = 'none';
+      showToast('✓ Backup restored! Refreshing app...', 'success');
+      setTimeout(() => location.reload(), 1200);
+
+    } catch (err) {
+      console.error('Backup import failed:', err);
+      elImportDataFile.value = '';
+      showToast('Restore failed: ' + err.message, 'error');
+    }
+  });
+
+  // --- Data Management: Clear All Data ---
+  elBtnClearData.addEventListener('click', async () => {
+    const confirmed = confirm(
+      'WARNING: This will permanently delete ALL notes, PDFs, settings, and doubts.\n\nThis cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+
+    const confirmed2 = confirm('Type OK to confirm permanent deletion of all Shakt data.');
+    if (!confirmed2) return;
+
+    try {
+      await window.shaktDB._tx('pdfs', 'readwrite', (store) => { store.clear(); });
+      await window.shaktDB._tx('pages', 'readwrite', (store) => { store.clear(); });
+      await window.shaktDB._tx('doubts', 'readwrite', (store) => { store.clear(); });
+      await window.shaktDB._tx('settings', 'readwrite', (store) => { store.clear(); });
+
+      elSettingsModal.style.display = 'none';
+      showToast('All data cleared. Refreshing...', 'info');
+      setTimeout(() => location.reload(), 1000);
+    } catch (err) {
+      console.error('Clear data failed:', err);
+      showToast('Clear failed: ' + err.message, 'error');
+    }
+  });
+
+  // --- Keyboard Shortcuts Help Modal ---
+  elBtnHelp.addEventListener('click', () => {
+    elShortcutsModal.style.display = 'flex';
+  });
+
+  elCloseShortcuts.addEventListener('click', () => {
+    elShortcutsModal.style.display = 'none';
+  });
+
+  elShortcutsModal.addEventListener('click', (e) => {
+    if (e.target === elShortcutsModal) {
+      elShortcutsModal.style.display = 'none';
+    }
   });
 
   // --- PDF Dropdown ---

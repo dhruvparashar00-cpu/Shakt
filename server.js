@@ -375,9 +375,50 @@ function handlePythonStatus(req, res) {
   });
 }
 
+// ============================================================================
+// RATE LIMITING (per-IP, in-memory store)
+// ============================================================================
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 30; // max requests per window per IP
+const rateLimitStore = new Map();
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function rateLimitCheck(ip) {
+  const now = Date.now();
+  const entry = rateLimitStore.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+
+  if (now > entry.resetAt) {
+    entry.count = 1;
+    entry.resetAt = now + RATE_LIMIT_WINDOW_MS;
+    rateLimitStore.set(ip, entry);
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1 };
+  }
+
+  entry.count++;
+  rateLimitStore.set(ip, entry);
+  const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - entry.count);
+  return { allowed: entry.count <= RATE_LIMIT_MAX_REQUESTS, remaining };
+}
+
+// Clean up stale rate limit entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitStore.entries()) {
+    if (now > entry.resetAt + RATE_LIMIT_WINDOW_MS) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000); // every 5 minutes
+
 const server = http.createServer((req, res) => {
   const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
   const requestStart = Date.now();
+  const clientIp = getClientIp(req);
 
   // Log all incoming requests
   log('INFO', 'requests', `Incoming request [${requestId}]`, {
@@ -388,8 +429,28 @@ const server = http.createServer((req, res) => {
       'content-type': req.headers['content-type'],
       'referer': req.headers['referer']
     },
-    ip: req.socket.remoteAddress
+    ip: clientIp
   });
+
+  // Apply rate limiting to API endpoints
+  const isApiRoute = req.url && (req.url.startsWith('/api/') || req.url === '/api/config');
+  if (isApiRoute) {
+    const rateLimit = rateLimitCheck(clientIp);
+    res.setHeader('X-RateLimit-Limit', RATE_LIMIT_MAX_REQUESTS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(rateLimit.resetAt / 1000));
+
+    if (!rateLimit.allowed) {
+      log('WARN', 'requests', `Rate limit exceeded for IP [${requestId}]`, { ip: clientIp });
+      res.writeHead(429, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Retry-After': Math.ceil((rateLimit.resetAt - Date.now()) / 1000)
+      });
+      res.end(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }));
+      return;
+    }
+  }
 
   // CORS headers for all requests
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -405,6 +466,50 @@ const server = http.createServer((req, res) => {
 
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
   const pathname = parsedUrl.pathname;
+
+  // Health check endpoint
+  if (pathname === '/api/health' && req.method === 'GET') {
+    const healthData = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      version: '1.2.0',
+      pythonEngine: null,
+      memory: process.memoryUsage()
+    };
+    // Quick check python engine availability
+    try {
+      const { spawn } = require('child_process');
+      const pyProc = spawn('python3', [path.join(__dirname, 'python_engine', 'pdf_service.py'), 'status']);
+      let stdoutData = '';
+      pyProc.stdout.on('data', chunk => { stdoutData += chunk; });
+      pyProc.on('close', code => {
+        try {
+          healthData.pythonEngine = JSON.parse(stdoutData || '{}');
+        } catch (_) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(healthData));
+      });
+      pyProc.on('error', () => {
+        healthData.pythonEngine = { status: 'unavailable' };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(healthData));
+      });
+      // Timeout the python check
+      setTimeout(() => {
+        if (!healthData.pythonEngine) {
+          healthData.pythonEngine = { status: 'timeout' };
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(healthData));
+        }
+      }, 3000);
+    } catch (_) {
+      healthData.pythonEngine = { status: 'error' };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(healthData));
+    }
+    return;
+  }
 
   // API Endpoints
   if (pathname === '/api/claude' && req.method === 'POST') {
@@ -510,7 +615,7 @@ server.listen(PORT, '0.0.0.0', () => {
     logsDir: LOGS_DIR,
     networkIps: ips,
     apiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
-    defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022'
+    defaultModel: process.env.ANTHROPIC_MODEL || 'omni-route'
   });
 
   console.log('========================================================');
